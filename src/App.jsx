@@ -7,7 +7,7 @@ function TestExtract() {
   const testAPI = async () => {
     setLoading(true);
     try {
-      const res = await fetch('https://voicely-gamma.vercel.app/api/extract', {
+      const res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: 'https://example.com' })
