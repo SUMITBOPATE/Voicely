@@ -1,5 +1,6 @@
-
-import * as cheerio from 'cheerio';
+export const config = {
+  runtime: 'edge'
+};
 
 function isValidUrl(value) {
   try {
@@ -10,31 +11,38 @@ function isValidUrl(value) {
   }
 }
 
-// Simple article extraction using cheerio
-function extractArticle($) {
-  // Remove unwanted elements
-  $('script, style, nav, footer, iframe, ads, sidebar').remove();
+function extractArticle(html) {
+  // Create a simple DOM parser using regex
+  const titleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i) ||
+    html.match(/<title[^>]*>([^<]*)<\/title>/i);
+  const title = titleMatch ? titleMatch[1].trim() : '';
 
-  // Try to find main content
-  const article = $('article').first();
-  const main = $('main').first();
-  const body = $('body');
+  const bylineMatch = html.match(/<meta[^>]*name=["']author["'][^>]*content=["']([^"']*)["']/i);
+  const byline = bylineMatch ? bylineMatch[1].trim() : '';
 
-  // Use the most specific container found
-  let content = article.length ? article : (main.length ? main : body);
+  // Remove scripts, styles, nav, footer
+  let text = html
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+    .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+    .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
 
-  // Extract title
-  const title = $('meta[property="og:title"]').attr('content') ||
-    $('title').text() ||
-    $('h1').first().text();
+  // Get body content
+  const bodyMatch = text.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  text = bodyMatch ? bodyMatch[1] : text;
 
-  // Extract byline
-  const byline = $('meta[name="author"]').attr('content') ||
-    $('[rel="author"]').text() ||
-    $('.author').text();
-
-  // Get text content
-  let text = content.text().trim();
+  // Strip HTML tags and decode entities
+  text = text.replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'");
 
   // Clean up whitespace
   text = text.replace(/\s+/g, ' ').trim();
@@ -76,9 +84,7 @@ export default async function handler(req) {
     });
 
     const html = await response.text();
-    const $ = cheerio.load(html);
-
-    const article = extractArticle($);
+    const article = extractArticle(html);
 
     const MAX_CHARS = 10000;
     let content = article.textContent;
