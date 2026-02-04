@@ -1,11 +1,6 @@
-import { JSDOM } from 'jsdom';
-import pkg from '@mozilla/readability';
-
-const { Readability } = pkg;
-
 export const config = {
   runtime: 'nodejs',
-  maxDuration: 30
+  maxDuration: 10
 };
 
 function isValidUrl(value) {
@@ -32,16 +27,19 @@ function decodeHtml(text) {
     .replace(/&hellip;/g, '...');
 }
 
-function fallbackExtract(html) {
+function extractArticle(html) {
   if (!html) return { title: '', byline: '', textContent: '' };
 
+  // Extract title
   const titleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i) ||
     html.match(/<title[^>]*>([^<]*)<\/title>/i);
   const title = titleMatch ? decodeHtml(titleMatch[1].trim()) : '';
 
+  // Extract byline
   const bylineMatch = html.match(/<meta[^>]*name=["']author["'][^>]*content=["']([^"']*)["']/i);
   const byline = bylineMatch ? decodeHtml(bylineMatch[1].trim()) : '';
 
+  // Remove unwanted elements
   let cleanHtml = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -58,9 +56,11 @@ function fallbackExtract(html) {
     .replace(/<select[^>]*>[\s\S]*?<\/select>/gi, '')
     .replace(/<textarea[^>]*>[\s\S]*?<\/textarea>/gi, '');
 
+  // Remove ad/sidebar elements
   cleanHtml = cleanHtml.replace(/<div[^>]*class=["']([^"']*)[-_]?(ad|sidebar|comment|social|share|related|promo|cookie|popup)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
   cleanHtml = cleanHtml.replace(/<div[^>]*id=["']([^"']*)[-_]?(ad|sidebar|comment|social|share|related|promo|cookie|popup)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
 
+  // Find main content
   let mainContent = '';
   const articleMatch = cleanHtml.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
   if (articleMatch) {
@@ -70,22 +70,19 @@ function fallbackExtract(html) {
     if (mainMatch) {
       mainContent = mainMatch[1];
     } else {
-      const contentMatch = cleanHtml.match(/<div[^>]*class=["']([^"']*content[^"']*)["'][^>]*>([\s\S]*?)<\/div>/i);
-      if (contentMatch) {
-        mainContent = contentMatch[2];
-      } else {
-        const bodyMatch = cleanHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-        mainContent = bodyMatch ? bodyMatch[1] : cleanHtml;
-      }
+      const bodyMatch = cleanHtml.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+      mainContent = bodyMatch ? bodyMatch[1] : cleanHtml;
     }
   }
 
+  // Extract paragraphs
   const paragraphs = mainContent.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [];
   let text = paragraphs
     .map(p => p.replace(/<[^>]+>/g, '').trim())
     .filter(p => p.length > 20)
     .join('\n\n');
 
+  // Fallback to all text if no good paragraphs
   if (text.length < 100) {
     text = mainContent
       .replace(/<[^>]+>/g, ' ')
@@ -126,21 +123,15 @@ export default async function handler(req) {
   }
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      signal: controller.signal
+      }
     });
-
-    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return new Response(JSON.stringify({
-        error: 'Failed to fetch article',
+        error: 'Failed to fetch URL',
         message: `HTTP ${response.status}: ${response.statusText}`
       }), {
         status: 502,
@@ -149,27 +140,11 @@ export default async function handler(req) {
     }
 
     const html = await response.text();
-    let article = null;
+    const { title, byline, textContent } = extractArticle(html);
 
-    try {
-      const dom = new JSDOM(html, { url });
-      const reader = new Readability(dom.window.document);
-      article = reader.parse();
-    } catch {
-      article = null;
-    }
-
-    const extracted = article && article.textContent && article.textContent.length > 100
-      ? {
-          title: article.title || '',
-          byline: article.byline || '',
-          textContent: article.textContent
-        }
-      : fallbackExtract(html);
-
-    if (!extracted.textContent || extracted.textContent.length < 10) {
+    if (!textContent || textContent.length < 10) {
       return new Response(JSON.stringify({
-        error: 'Could not extract article content',
+        error: 'Could not extract article',
         message: 'The page may not contain readable text'
       }), {
         status: 422,
@@ -178,34 +153,20 @@ export default async function handler(req) {
     }
 
     const MAX_CHARS = 10000;
-    let content = extracted.textContent;
-    const wasTruncated = content.length > MAX_CHARS;
-    if (wasTruncated) {
-      content = content.slice(0, MAX_CHARS);
-    }
+    const content = textContent.slice(0, MAX_CHARS);
 
     return new Response(JSON.stringify({
-      title: extracted.title || 'Untitled',
+      title: title || 'Untitled',
       content: content,
-      byline: extracted.byline,
-      originalLength: extracted.textContent.length,
-      wasTruncated
+      byline: byline,
+      originalLength: textContent.length,
+      wasTruncated: textContent.length > MAX_CHARS
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
-    if (error.name === 'AbortError') {
-      return new Response(JSON.stringify({
-        error: 'Request timed out',
-        message: 'The extraction took too long. Please try a simpler page.'
-      }), {
-        status: 504,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
     return new Response(JSON.stringify({
       error: 'Failed to extract article',
       message: error.message
