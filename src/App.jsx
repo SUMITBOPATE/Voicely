@@ -13,28 +13,52 @@ function App() {
     setArticle(null);
 
     try {
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
+      // Use Jina AI directly - no server timeout
+      const cleanUrl = url.replace(/^https?:\/\//, '');
+      const jinaUrl = `https://r.jina.ai/http://${cleanUrl}`;
+
+      const response = await fetch(jinaUrl, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' }
       });
 
-      // Get raw text first to handle non-JSON responses
-      const text = await res.text();
-
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        // If not JSON, use the raw text as error
-        throw new Error(text || 'Server error');
+      if (!response.ok) {
+        throw new Error('Failed to fetch article');
       }
 
-      if (!res.ok) {
-        throw new Error(data?.error || data?.message || 'Failed to extract article');
+      const text = await response.text();
+
+      // Parse Jina response
+      let title = '';
+      let content = text;
+
+      // Extract title if present
+      const titleMatch = text.match(/^(?:Title[:\s]+)([^\n]+)/im);
+      if (titleMatch) {
+        title = titleMatch[1].trim();
+        content = text.replace(/^(?:Title[:\s]+)[^\n]+\n*/im, '').trim();
       }
 
-      setArticle(data);
+      // Remove "Source:" lines
+      content = content.replace(/^Source:[^\n]*\n*/gim, '').trim();
+
+      // Clean up whitespace
+      content = content.replace(/\n{3,}/g, '\n\n').trim();
+
+      if (!content || content.length < 10) {
+        throw new Error('Could not extract article content');
+      }
+
+      const MAX_CHARS = 10000;
+      const truncated = content.length > MAX_CHARS;
+
+      setArticle({
+        title: title || 'Untitled',
+        content: truncated ? content.slice(0, MAX_CHARS) : content,
+        byline: '',
+        originalLength: content.length,
+        wasTruncated: truncated
+      });
     } catch (err) {
       setError(err.message || 'Failed to extract article');
     } finally {
@@ -90,7 +114,6 @@ function App() {
         <div style={{ background: 'white', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)', overflow: 'hidden' }}>
           <div style={{ padding: '20px', borderBottom: '1px solid #eee' }}>
             <h2 style={{ margin: '0 0 10px 0', color: '#1f2937', fontSize: '24px' }}>{article.title}</h2>
-            {article.byline && <p style={{ margin: 0, color: '#6b7280' }}>By {article.byline}</p>}
           </div>
 
           <div style={{ padding: '20px', lineHeight: '1.8', color: '#374151' }}>
