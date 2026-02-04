@@ -19,15 +19,24 @@ function App() {
         body: JSON.stringify({ url })
       });
 
-      const data = await res.json();
+      // Get raw text first to handle non-JSON responses
+      const text = await res.text();
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // If not JSON, use the raw text as error
+        throw new Error(text || 'Server error');
+      }
 
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to extract article');
+        throw new Error(data?.error || data?.message || 'Failed to extract article');
       }
 
       setArticle(data);
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to extract article');
     } finally {
       setLoading(false);
     }
