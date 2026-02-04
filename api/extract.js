@@ -1,6 +1,5 @@
 export const config = {
-  runtime: 'nodejs',
-  maxDuration: 10
+  runtime: 'edge'
 };
 
 function isValidUrl(value) {
@@ -30,16 +29,13 @@ function decodeHtml(text) {
 function extractArticle(html) {
   if (!html) return { title: '', byline: '', textContent: '' };
 
-  // Extract title
   const titleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i) ||
     html.match(/<title[^>]*>([^<]*)<\/title>/i);
   const title = titleMatch ? decodeHtml(titleMatch[1].trim()) : '';
 
-  // Extract byline
   const bylineMatch = html.match(/<meta[^>]*name=["']author["'][^>]*content=["']([^"']*)["']/i);
   const byline = bylineMatch ? decodeHtml(bylineMatch[1].trim()) : '';
 
-  // Remove unwanted elements
   let cleanHtml = html
     .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
@@ -56,11 +52,6 @@ function extractArticle(html) {
     .replace(/<select[^>]*>[\s\S]*?<\/select>/gi, '')
     .replace(/<textarea[^>]*>[\s\S]*?<\/textarea>/gi, '');
 
-  // Remove ad/sidebar elements
-  cleanHtml = cleanHtml.replace(/<div[^>]*class=["']([^"']*)[-_]?(ad|sidebar|comment|social|share|related|promo|cookie|popup)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
-  cleanHtml = cleanHtml.replace(/<div[^>]*id=["']([^"']*)[-_]?(ad|sidebar|comment|social|share|related|promo|cookie|popup)[^"']*["'][^>]*>[\s\S]*?<\/div>/gi, '');
-
-  // Find main content
   let mainContent = '';
   const articleMatch = cleanHtml.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
   if (articleMatch) {
@@ -75,14 +66,12 @@ function extractArticle(html) {
     }
   }
 
-  // Extract paragraphs
   const paragraphs = mainContent.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || [];
   let text = paragraphs
     .map(p => p.replace(/<[^>]+>/g, '').trim())
     .filter(p => p.length > 20)
     .join('\n\n');
 
-  // Fallback to all text if no good paragraphs
   if (text.length < 100) {
     text = mainContent
       .replace(/<[^>]+>/g, ' ')
